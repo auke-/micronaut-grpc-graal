@@ -1,0 +1,5 @@
+profile: grpc
+defaultPackage: micronaut.grpc.graal
+---
+testFramework: junit
+sourceLanguage: java
