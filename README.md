@@ -63,3 +63,48 @@ Call path from entry point to io.netty.handler.codec.http2.DefaultHttp2FrameWrit
 
 Warning: Use -H:+ReportExceptionStackTraces to print stacktrace of underlying exception
 ```
+
+Currently Micronaut uses Netty version *4.1.30.Final*. The latest version (*4.1.36.Final*) contains
+substitutes for GraalVM, which would make the substitutes in Micronaut obsolete. Unfortunately
+Micronaut isn't compatible with Netty *4.1.36.Final*. However, the substitutes from this version
+can be applied to the current version of Micronaut, especially the two following lines:
+```bash
+  --rerun-class-initialization-at-runtime=io.netty.handler.codec.http2.Http2CodecUtil
+  --initialize-at-run-time=io.netty.handler.codec.http2.DefaultHttp2FrameWriter
+```
+Those lines are taken from the following Netty change:
+https://github.com/netty/netty/commit/f1495e19459eb4e961b1c078e7692680f88a0803#diff-5cbe3026d0fe94bd7b8480f692edfb17R15
+
+When those options are applied to the sample project (by adding them to native-image.properties)
+the project builds correctly in both the JVM and as a GraalVM native image. Unfortunately the
+application doesn't work because the example project doesn't implement and exposes the example
+service. We need to implement the service, e.g. like this:
+```java
+@Singleton
+public class ExampleEndpoint extends ExampleServiceGrpc.ExampleServiceImplBase {
+
+  @Override
+  public void send(ExampleRequest request,
+      StreamObserver<ExampleReply> responseObserver) {
+    ExampleReply reply = ExampleReply.newBuilder()
+        .setMessage("Hi " + request.getName())
+        .build();
+    responseObserver.onNext(reply);
+    responseObserver.onCompleted();
+  }
+
+}
+```
+
+With the service enabled the native compilation fails again with the following messages:
+```bash
+$ ./mvnw clean package && ./docker-build.sh
+...
+Warning: RecomputeFieldValue.ArrayBaseOffset automatic substitution failed. The automatic substitution registration was attempted because a call to sun.misc.Unsafe.arrayBaseOffset(Class) was detected in the static initializer of com.google.protobuf.UnsafeUtil. Detailed failure reason(s): Could not determine the field where the value produced by the call to sun.misc.Unsafe.arrayBaseOffset(Class) for the array base offset computation is stored. The call is not directly followed by a field store or by a sign extend node followed directly by a field store.
+...
+Error: Class that is marked for delaying initialization to run time got initialized during image building: com.google.protobuf.ExtensionRegistry. Try marking this class for build-time initialization with --initialize-at-build-time=com.google.protobuf.ExtensionRegistry
+Error: Use -H:+ReportExceptionStackTraces to print stacktrace of underlying exception
+Error: Image build request failed with exit status 1
+```
+
+It seems like com.google.protobuf.UnsafeUtil and com.google.protobuf.ExtensionRegistry needs some configuration in order to work with GraalVM.
