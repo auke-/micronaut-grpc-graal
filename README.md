@@ -1,5 +1,5 @@
 # micronaut-grpc-graal
-Repository to investigate Micronaut GRPC on Graal
+Repository to investigate Micronaut gRPC on Graal
 
 The project is created with the Micronaut 1.1.3 command line tool:
 ```bash
@@ -108,3 +108,38 @@ Error: Image build request failed with exit status 1
 ```
 
 It seems like com.google.protobuf.UnsafeUtil and com.google.protobuf.ExtensionRegistry needs some configuration in order to work with GraalVM.
+
+When we mark the whole protobuf package to initialize at build time the image can be build:
+```bash
+  --rerun-class-initialization-at-runtime=io.netty.handler.codec.http2.Http2CodecUtil \
+  --initialize-at-run-time=io.netty.handler.codec.http2.DefaultHttp2FrameWriter \
+  --initialize-at-build-time=com.google.protobuf
+```
+
+```bash
+$ ./mvnw clean package && ./docker-build.sh
+...
+Warning: Using a deprecated option --rerun-class-initialization-at-runtime. Currently there is no replacement for this option. Try using --initialize-at-run-time or use the non-API option -H:ClassInitialization directly.
+...
+Warning: RecomputeFieldValue.FieldOffset automatic substitution failed. The automatic substitution registration was attempted because a call to sun.misc.Unsafe.objectFieldOffset(Field) was detected in the static initializer of com.google.protobuf.UnsafeUtil. Detailed failure reason(s): The argument of Unsafe.objectFieldOffset(Field) is not a constant field., Could not determine the field where the value produced by the call to sun.misc.Unsafe.objectFieldOffset(Field) for the field offset computation is stored. The call is not directly followed by a field store or by a sign extend node followed directly by a field store.
+Warning: RecomputeFieldValue.FieldOffset automatic substitution failed. The automatic substitution registration was attempted because a call to sun.misc.Unsafe.objectFieldOffset(Field) was detected in the static initializer of com.google.protobuf.UnsafeUtil. Detailed failure reason(s): The argument of Unsafe.objectFieldOffset(Field) is not a constant field., Could not determine the field where the value produced by the call to sun.misc.Unsafe.objectFieldOffset(Field) for the field offset computation is stored. The call is not directly followed by a field store or by a sign extend node followed directly by a field store.
+...
+Successfully tagged micronaut-grpc-graal:latest
+
+
+To run the docker container execute:
+    $ docker run -p 8080:8080 micronaut-grpc-graal
+```
+
+The gRPC server runs on port 50051, so we have to expose this port when starting the container:
+```bash
+$ docker run --rm --name micronaut-grpc-graal -p 50051:50051 micronaut-grpc-graal
+... [main] INFO  io.micronaut.runtime.Micronaut - Startup completed in 20ms. Server Running: http://localhost:50051
+```
+
+Now we can send a request to our service, for example with the gRPC CLI:
+```bash
+docker run --network=host -v $(pwd)/src/main/proto:/proto --rm -it namely/grpc-cli \
+  call localhost:50051 micronaut.grpc.graal.ExampleService.send \
+  "name: 'Me'" --proto_path=/proto/ --protofiles=example.proto --remotedb=false
+```
